@@ -16,6 +16,22 @@
                 <p class="description1">MetaTube Plugin for Jellyfin/Emby. <a class="button-link emby-button" href="https://metatube-community.github.io" is="emby-linkbutton" target="_blank">Learn more</a>.</p>
             </div>
 
+            <div class="verticalSection MetaTubeTaskProgress">
+                <h2 class="sectionTitle">Scheduled tasks</h2>
+
+                <div class="inputContainer MetaTubeTaskProgressItem" data-task-key="MetaTubeOrganizeMetadata">
+                    <label class="inputLabel">Organize metadata</label>
+                    <progress class="MetaTubeTaskProgressBar" max="100" value="0" style="width: 100%;"></progress>
+                    <div class="fieldDescription MetaTubeTaskProgressStatus">Loading task status...</div>
+                </div>
+
+                <div class="inputContainer MetaTubeTaskProgressItem" data-task-key="MetaTubeGenerateTrailers">
+                    <label class="inputLabel">Generate trailers</label>
+                    <progress class="MetaTubeTaskProgressBar" max="100" value="0" style="width: 100%;"></progress>
+                    <div class="fieldDescription MetaTubeTaskProgressStatus">Loading task status...</div>
+                </div>
+            </div>
+
             <form class="MetaTubeConfigurationForm">
 
                 <div class="verticalSection">
@@ -295,6 +311,92 @@
             pluginUniqueId: "01cc53ec-c415-4108-bbd4-a684a9801a32"
         };
 
+        var metaTubeTaskProgressTimer;
+
+        function getMetaTubeTaskStatus(task) {
+            if (!task) {
+                return "Unavailable";
+            }
+
+            var state = String(task.State || "").toLowerCase();
+            var resultStatus = task.LastExecutionResult && task.LastExecutionResult.Status;
+
+            if (task.IsRunning === true || state === "running" || state === "cancelling") {
+                return "Running";
+            }
+
+            if (resultStatus) {
+                return String(resultStatus);
+            }
+
+            return task.State ? String(task.State) : "Idle";
+        }
+
+        function updateMetaTubeTaskProgress(page, task) {
+            var taskKey = task && task.Key;
+            var taskElement = page.querySelector('[data-task-key="' + taskKey + '"]');
+            if (!taskElement) {
+                return;
+            }
+
+            var progress = Number(task.CurrentProgress);
+            if (!Number.isFinite(progress)) {
+                progress = 0;
+            }
+            progress = Math.max(0, Math.min(100, progress));
+
+            taskElement.querySelector('.MetaTubeTaskProgressBar').value = progress;
+            taskElement.querySelector('.MetaTubeTaskProgressStatus').textContent =
+                getMetaTubeTaskStatus(task) + " - " + Math.round(progress) + "%";
+        }
+
+        function updateMetaTubeTaskProgressError(page) {
+            page.querySelectorAll('.MetaTubeTaskProgressItem').forEach(function (taskElement) {
+                taskElement.querySelector('.MetaTubeTaskProgressStatus').textContent =
+                    "Unable to load task status";
+            });
+        }
+
+        function refreshMetaTubeTaskProgress(page) {
+            ApiClient.getScheduledTasks().then(function (tasks) {
+                if (!Array.isArray(tasks)) {
+                    throw new Error("Invalid scheduled task response");
+                }
+
+                var matchedTasks = tasks.filter(function (task) {
+                    return task.Key === "MetaTubeOrganizeMetadata" || task.Key === "MetaTubeGenerateTrailers";
+                });
+
+                page.querySelectorAll('.MetaTubeTaskProgressItem').forEach(function (taskElement) {
+                    var taskKey = taskElement.getAttribute('data-task-key');
+                    var task = matchedTasks.find(function (item) {
+                        return item.Key === taskKey;
+                    });
+                    if (task) {
+                        updateMetaTubeTaskProgress(page, task);
+                    } else {
+                        taskElement.querySelector('.MetaTubeTaskProgressStatus').textContent =
+                            "Task is unavailable";
+                    }
+                });
+            }).catch(function () {
+                updateMetaTubeTaskProgressError(page);
+            });
+        }
+
+        function startMetaTubeTaskProgressRefresh(page) {
+            clearInterval(metaTubeTaskProgressTimer);
+            refreshMetaTubeTaskProgress(page);
+            metaTubeTaskProgressTimer = setInterval(function () {
+                refreshMetaTubeTaskProgress(page);
+            }, 2000);
+        }
+
+        function stopMetaTubeTaskProgressRefresh() {
+            clearInterval(metaTubeTaskProgressTimer);
+            metaTubeTaskProgressTimer = null;
+        }
+
         $('.selectTranslationMode').on('change', function (_) {
             if (this.value === "Disabled") {
                 $('.selectTranslationModeEnabled').css('display', 'none');
@@ -340,6 +442,7 @@
         $('.MetaTubeConfigurationPage').on('pageshow', function () {
             Dashboard.showLoadingMsg();
             var page = this;
+            startMetaTubeTaskProgressRefresh(page);
             ApiClient.getPluginConfiguration(MetaTubePluginConfig.pluginUniqueId).then(function (config) {
                 $('#txtServer', page).val(config.Server).change();
                 $('#txtToken', page).val(config.Token).change();
@@ -419,6 +522,10 @@
             });
             // Disable default form submission
             return false;
+        });
+
+        $('.MetaTubeConfigurationPage').on('pagehide', function () {
+            stopMetaTubeTaskProgressRefresh();
         });
     </script>
 </div>
