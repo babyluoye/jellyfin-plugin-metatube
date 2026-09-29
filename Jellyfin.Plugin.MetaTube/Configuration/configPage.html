@@ -339,8 +339,13 @@
                 return;
             }
 
-            var progress = Number(task.CurrentProgress);
-            if (!Number.isFinite(progress)) {
+            var state = String(task.State || "").toLowerCase();
+            var resultStatus = task.LastExecutionResult && task.LastExecutionResult.Status;
+            var progress = Number(task.CurrentProgressPercentage);
+            if (state !== "running" && state !== "cancelling" &&
+                String(resultStatus || "").toLowerCase() === "completed") {
+                progress = 100;
+            } else if (!Number.isFinite(progress)) {
                 progress = 0;
             }
             progress = Math.max(0, Math.min(100, progress));
